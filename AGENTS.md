@@ -145,3 +145,11 @@ Não persista e-mails completos por padrão; busque somente o necessário e mini
 Quando concluir uma tarefa relevante, proponha uma atualização de `TASKS.md` e do README se o estado documentado mudou. Não afirme que os arquivos foram atualizados se não os alterou de fato.
 
 Ao iniciar uma sessão, leia este arquivo, o README, o TASKS e os arquivos do código que forem relevantes. Use o repositório como fonte de verdade para o estado atual.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+<!-- END:nextjs-agent-rules -->

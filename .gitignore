@@ -8,3 +8,9 @@ next-env.d.ts
 !.env.example
 .npm-cache/
 !tsconfig.json
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+/app/generated/prisma/
+/.mortus-test/
