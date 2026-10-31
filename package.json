@@ -1,9 +1,10 @@
 {
   "name": "mortus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "scripts": {
     "dev": "next dev --hostname 0.0.0.0",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test",
     "build": "next build",
     "start": "next start --hostname 0.0.0.0"
   },
