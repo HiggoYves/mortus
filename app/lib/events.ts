@@ -38,7 +38,7 @@ export function deleteCalendarEvent(events: CalendarEvent[], id: number): Calend
   return events.filter((event) => event.id !== id);
 }
 
-function isValidDate(value: unknown): value is string {
+export function isValidDate(value: unknown): value is string {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
 
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -74,12 +74,8 @@ export function validateEventTimeRange(startDate: string, startTime: string, end
   return null;
 }
 
-export function isCalendarEvent(value: unknown): value is CalendarEvent {
-  if (typeof value !== "object" || value === null) return false;
-
-  const event = value as Record<string, unknown>;
+function hasValidEventFields(event: Record<string, unknown>): boolean {
   return (
-    Number.isSafeInteger(event.id) &&
     typeof event.title === "string" &&
     event.title.trim().length > 0 &&
     isValidDate(event.date) &&
@@ -89,6 +85,19 @@ export function isCalendarEvent(value: unknown): value is CalendarEvent {
     validateEventTimeRange(event.date, event.startTime, event.endDate, event.endTime) === null &&
     eventCategories.includes(event.category as EventCategory)
   );
+}
+
+export function isValidEventDraft(value: unknown): value is EventDraft {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  return !("id" in event) && hasValidEventFields(event);
+}
+
+export function isCalendarEvent(value: unknown): value is CalendarEvent {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+
+  const event = value as Record<string, unknown>;
+  return Number.isSafeInteger(event.id) && hasValidEventFields(event);
 }
 
 function migrateCalendarEvent(value: unknown): CalendarEvent | null {

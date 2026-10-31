@@ -1,0 +1,21 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../app/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Event {
+  id        BigInt @id @default(autoincrement())
+  title     String
+  date      String
+  endDate   String
+  startTime String
+  endTime   String
+  category  String
+
+  @@index([date])
+  @@index([endDate])
+}
