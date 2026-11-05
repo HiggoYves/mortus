@@ -5,6 +5,7 @@ import type { CalendarEvent, EventDraft } from "./events.ts";
 
 const EVENT_ID_NAMESPACE_START = 2 ** 52;
 const MAX_ID_ALLOCATION_ATTEMPTS = 8;
+const MAX_LIST_LIMIT = 101;
 
 export type EventDateRange = {
   from?: unknown;
@@ -184,14 +185,18 @@ export function createEventRepository(client: PrismaClient, options: EventReposi
     throw new EventIdAllocationError();
   }
 
-  async function list(range: unknown = {}): Promise<CalendarEvent[]> {
+  async function list(range: unknown = {}, limit?: number): Promise<CalendarEvent[]> {
     const { from, to } = validateDateRange(range);
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIST_LIMIT)) {
+      throw new EventRepositoryValidationError(`O limite de listagem deve ser um inteiro entre 1 e ${MAX_LIST_LIMIT}.`);
+    }
     const events = await client.event.findMany({
       where: {
         ...(to === undefined ? {} : { date: { lte: to } }),
         ...(from === undefined ? {} : { endDate: { gte: from } }),
       },
       orderBy: [{ date: "asc" }, { startTime: "asc" }, { id: "asc" }],
+      ...(limit === undefined ? {} : { take: limit }),
     });
     return events.map(toCalendarEvent);
   }

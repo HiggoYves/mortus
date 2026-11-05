@@ -12,6 +12,9 @@ $stdoutPath = Join-Path $testDirectory "server.stdout.log"
 $stderrPath = Join-Path $testDirectory "server.stderr.log"
 $port = 3002
 $nextCli = [IO.Path]::GetFullPath((Join-Path $projectRoot "node_modules\next\dist\bin\next"))
+$serverScript = [IO.Path]::GetFullPath((Join-Path $projectRoot "node_modules\next\dist\server\lib\start-server.js"))
+$nodePath = [IO.Path]::GetFullPath((Get-Command node.exe -ErrorAction Stop).Source)
+$nextArguments = Get-MortusNextArgumentList -NextCli $nextCli -Port $port
 
 Assert-MortusTestPaths -ProjectRoot $projectRoot -TestDirectory $testDirectory -TestDatabase $testDatabase -MainDatabase $mainDatabase
 if (-not (Test-Path -LiteralPath (Join-Path $projectRoot "node_modules\.bin\prisma.cmd") -PathType Leaf)) {
@@ -35,14 +38,14 @@ if (Test-Path -LiteralPath $testDatabase) {
 }
 
 # Fail closed if Windows cannot enumerate processes or listeners. This happens before any migration.
-$processes = @(Get-MortusTestProcessInventory -NextCli $nextCli -Port $port)
+$processes = @(Get-MortusTestProcessInventory -NodePath $nodePath -NextCli $nextCli -Port $port -ServerScript $serverScript)
 $listeners = @(Get-MortusPortListeners -Port $port)
 Assert-MortusTestServerStopped -ProcessInventory $processes -PortListeners $listeners
 
-$nodePath = (Get-Command node.exe -ErrorAction Stop).Source
 $manifest = [ordered]@{
   state = "starting"
   pid = $null
+  processCreatedAt = $null
   databaseUrl = $databaseUrl
   databasePath = (Get-MortusFullPath $testDatabase)
   mainDatabasePath = (Get-MortusFullPath $mainDatabase)
@@ -70,8 +73,12 @@ try {
   Assert-MortusTestPaths -ProjectRoot $projectRoot -TestDirectory $testDirectory -TestDatabase $testDatabase -MainDatabase $mainDatabase
   Assert-MortusDatabaseIsolated -TestDatabase $testDatabase -MainDatabase $mainDatabase
 
-  $serverProcess = Start-Process -FilePath $nodePath -ArgumentList @('"' + $nextCli + '"', "dev", "--hostname", "127.0.0.1", "--port", "$port") -WorkingDirectory $projectRoot -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
+  $serverProcess = Start-Process -FilePath $nodePath -ArgumentList $nextArguments -WorkingDirectory $projectRoot -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -WindowStyle Hidden -PassThru
   $manifest.pid = $serverProcess.Id
+  $processInfo = @(Get-MortusProcessById -ProcessId $serverProcess.Id)
+  if ($processInfo.Count -ne 1 -or -not (Test-MortusTestProcess $processInfo[0] $nodePath $nextCli $port)) { throw "Não foi possível comprovar a identidade do processo Node iniciado; manifesto preservado." }
+  $manifest.processCreatedAt = Get-MortusProcessCreatedAt $processInfo[0]
+  if (-not $manifest.processCreatedAt) { throw "O Windows não forneceu a data de criação do processo; manifesto preservado." }
   Write-MortusTestManifest -ManifestPath $manifestPath -Manifest $manifest
 
   $responding = $false

@@ -1,6 +1,6 @@
-﻿# TASKS.md — Estado e próximos passos
+# TASKS.md — Estado e próximos passos
 
-## Estado atual verificado (2026-10-31)
+## Estado atual verificado (2026-11-05)
 - [x] Ideia e objetivo do projeto definidos.
 - [x] Direção do produto alinhada: calendário próprio com assistente de IA e lembretes; voz, Google Calendar e Gmail ficam para etapas futuras.
 - [x] Stack e arquitetura inicial propostas.
@@ -15,8 +15,13 @@
 - [x] Exportação e importação de backup JSON com versão, validação integral e confirmação explícita de substituição.
 - [x] Operações de criar, consultar, editar e excluir eventos (validadas manualmente pelo usuário).
 - [x] Persistência em `localStorage` e recuperação local (validadas manualmente pelo usuário).
-- [ ] Assistente de IA integrado aos eventos.
-- [ ] Lembretes configuráveis implementados.
+- [x] Assistente de IA consulta eventos pela interface com ferramentas exclusivamente de leitura; escrita por IA permanece futura.
+- [x] Etapa 7.2 — Fundação do assistente: contrato TypeScript, provedor simulado determinístico, serviço validado, endpoint local, limite de mensagem/corpo, timeout e tratamento de indisponibilidade. Sem chamadas externas, dados de eventos, persistência de conversas ou operações de calendário.
+- [x] Etapa 7.3 — Ferramentas de leitura `list_events` e `get_agenda_summary`, com comandos simulados estruturados, validação independente, intervalo/eventos limitados e repositório injetado. Sem escrita ou chamadas externas.
+- [x] Etapa 7.4 — Adaptador oficial Gemini configurável, mock mantido como padrão, data Manaus, ferramentas de leitura permitidas, limites locais e erros tratados. Geração real validada manualmente com `gemini-3.1-flash-lite` e dados fictícios; cota contínua e custos não verificados.
+- [x] Etapa 7.6 — Gemini seleciona `list_events` e `get_agenda_summary` via function calling `AUTO`; o servidor valida datas, executa consultas locais e devolve os resultados somente ao cliente. Datas relativas usam a data local Manaus; “esta semana” é segunda a domingo e “próximos sete dias” é hoje a hoje + 6. O mock estruturado permanece. Cobertura automatizada usa cliente falso, sem chamadas externas.
+- [x] Etapa 7.7 — Painel lateral responsivo integrado ao calendário. Histórico permanece em memória ao fechar/reabrir, dados são exibidos sem JSON bruto, erros são mensagens seguras e o cliente envia somente a mensagem do usuário.
+- [ ] Lembretes configuráveis ainda não implementados.
 - [x] Infraestrutura Prisma + SQLite, repositório CRUD e API REST local de eventos implementados. Autenticação, ligação da interface e migração dos dados do navegador continuam pendentes.
 - [x] Etapa 6.3 — Repositório Prisma com CRUD, validação compartilhada, IDs numéricos compatíveis e testes de integração em SQLite temporário.
 - [x] Etapa 6.4 — Route Handlers REST para listar, criar, consultar, editar e excluir; validação de campos e origem local com testes em SQLite temporário. API sem autenticação, restrita ao uso local e não adequada para exposição pública.
@@ -32,7 +37,7 @@
 1. Implementar autenticação e autorização antes de qualquer exposição do backend à rede.
 2. Ligar a interface à API após definir a estratégia de autenticação e migração.
 3. Implementar autenticação/autorização antes de qualquer acesso remoto e planejar a migração de volta do SQLite sem sobrescrever o `localStorage` automaticamente.
-4. Integrar IA, lembretes, acesso móvel, Google Calendar, Gmail e voz em etapas futuras.
+4. Implementar autenticação/autorização antes de qualquer acesso em rede; avaliar lembretes, sincronização Google Calendar, notificações Gmail e voz como etapas futuras.
 
 O diagnóstico de rede e a tentativa anterior do gerador são registros históricos; a aplicação já foi criada. A configuração npm não foi alterada.
 
@@ -43,7 +48,13 @@ O diagnóstico de rede e a tentativa anterior do gerador são registros históri
 - [x] Etapa 4 — Proteger dados armazenados (validação de estado, bloqueio de gravação após falhas e backup JSON).
 - [x] Etapa 5 — Criar testes automatizados (33 testes com `node:test`; módulos de domínio, armazenamento e backup).
 - [ ] Etapa 6 — Backend e banco de dados (infraestrutura, repositório, API REST local, importação segura e ligação local da interface prontos; autenticação/autorização e eventual acesso remoto pendentes).
-- [ ] Etapa 7 — Integrar IA.
+- [x] Etapa 7 — Assistente de IA somente leitura implementado nas etapas 7.2 a 7.7.
+- [x] Etapa 7.2 — Preparar contrato e infraestrutura simulada sem provedor real.
+- [x] Etapa 7.3 — Ferramentas simuladas e controladas de consulta e resumo diário/semanal.
+- [x] Etapa 7.4 — Adaptador `@google/genai`; provedor mock permanece padrão e Gemini exige configuração explícita. Geração real com `gemini-3.1-flash-lite` validada pelo usuário com conteúdo fictício.
+- [ ] Etapa 7.5 — Ações de escrita por IA, com validação, detecção de conflitos e confirmação explícita; ainda não implementadas.
+- [x] Etapa 7.6 — Consultas em português natural por function calling Gemini, com datas relativas em America/Manaus, validação local e somente leitura. Os eventos não retornam ao provedor.
+- [x] Etapa 7.7 — Interface de chat responsiva ligada a `POST /api/assistant`, com histórico em memória, estados de envio/erro e apresentação validada de eventos e resumos. Nenhuma escrita por IA nem envio dos resultados ao provedor.
 
 ## Decisões técnicas atuais
 - Plataforma inicial: web responsiva para computador e celular.
@@ -52,9 +63,12 @@ O diagnóstico de rede e a tentativa anterior do gerador são registros históri
 - Stack implementada: Next.js 16.4.3, React e TypeScript, com CSS próprio; Prisma ORM 7.10.1 com SQLite local e adapter `better-sqlite3`.
 - Persistência: modo inicial no `localStorage`; modo SQLite ativado somente após migração confirmada e verificada. A cópia local é preservada, sem sincronização entre dispositivos ou backup no servidor.
 - Calendário do Mortus será a agenda própria inicial; sincronização com Google Calendar é futura.
-- Integrações futuras: Google Calendar para sincronização, Gmail para notificações e API de IA para comandos sobre eventos.
+- Assistente atual: Gemini para consultas somente leitura; ferramentas de escrita por IA permanecem fora do escopo concluído.
+- Integrações futuras: Google Calendar para sincronização e Gmail para notificações.
 - WhatsApp: fora do MVP inicial.
 - Banco local: arquivo SQLite ignorado pelo Git; repositório Prisma e integração de interface testados com banco temporário isolado; API sem autenticação e restrita a `127.0.0.1:3000`. O `localStorage` é mantido como retrato pré-migração não sincronizado.
+- Scripts do ambiente de teste: `test-env:stop` distingue ausência confiável de listeners do erro de consulta, confirma o PID registrado e remove manifestos órfãos somente sem processo/listener correspondente. A recuperação validada preservou o banco de teste, o banco principal e os logs.
+- IA: `POST /api/assistant` usa mock por padrão; `MORTUS_AI_PROVIDER=gemini` ativa o adaptador `@google/genai` e `GEMINI_API_KEY` somente no servidor. Máximo local de 5 chamadas/minuto e 30 em 24 horas por processo; até 512 tokens de saída e no máximo uma chamada do modelo por mensagem. Mensagens e esquemas das ferramentas podem ir ao Gemini, mas eventos e resultados não. Qualquer proposta futura para enviar eventos exigirá consentimento por consulta, desativado por padrão, com prévia dos campos/intervalo e opção de cancelar.
 
 - 2026-10-28: primeira inspeção confirmou que o projeto ainda está somente no estágio de planejamento. O diretório não contém código, dependências ou repositório Git.
 - 2026-10-28: usuário confirmou HTTP 200 no PowerShell local, mas o executor desta sessão segue em sandbox com rede restrita. A configuração npm está correta; o bloqueio ocorre no executor. A UI automation de terminais é vedada pela skill computer-use. Retomar quando houver executor local/rede disponível.
@@ -72,3 +86,6 @@ O diagnóstico de rede e a tentativa anterior do gerador são registros históri
 - 2026-10-31: Etapa 6.5A adicionou `importBatch` ao repositório. A operação valida a lista inteira antes da transação, preserva IDs seguros e datas explícitas, reconhece duplicatas idênticas e aborta/retorna resumo em conflito com conteúdo diferente. A suíte testa rollback real em SQLite temporário, repetição idempotente, eventos noturnos e compatibilidade com a lista de um backup JSON v1. Nenhuma rota, tela ou execução automática de migração foi criada; dados reais não foram acessados.
 - 2026-10-31: Etapa 6.5B integrou a interface sem executar migração automaticamente. O usuário revisa contagens, baixa e confirma backup v1 e confirma a importação; demos exatas são excluídas do lote. Uma Server Action local valida `Origin`/`Host` antes do `importBatch`; após releitura e conferência, a interface marca o modo SQLite sem alterar a lista do `localStorage`. CRUD usa a API no modo SQLite; falhas mantêm a última lista em tela e bloqueiam gravações se não for possível sincronizar. Nenhum dado real foi migrado.
 - 2026-10-31: Etapa 6.5C adicionou ambiente manual de migração em `.mortus-test/migration-test.db`, independente do caminho principal `prisma/mortus.db`. O script aplica apenas as migrações locais no banco de teste, inicia Next em `127.0.0.1:3002` (3001 estava ocupada), registra e permite conferir o caminho real e oferece encerramento sem apagar dados e descarte com confirmação explícita. Prisma CLI e cliente do servidor falham se a URL divergir da URL fixa de teste. A origem/porta tem armazenamento de navegador separado; use somente dados fictícios. Nenhum evento real foi migrado.
+- 2026-11-05: recuperação de manifesto órfão corrigida. `Get-NetTCPConnection` só representa porta sem listeners quando retorna o marcador esperado de `ObjectNotFound`; falhas de consulta continuam bloqueando. PID 30708 foi confirmado ausente, sem processos Next correspondentes e sem listener na porta 3002; `test-env:stop` removeu o manifesto e preservou banco de teste, banco principal e logs. Nenhuma migração ou descarte foi executado.
+- 2026-11-05: `test-env:stop` corrigido para verificar exclusivamente o PID Node registrado por caminho do executável, argumentos Next e horário de criação. Removidos a seleção por `ParentProcessId` e `taskkill /T`, evitando atingir auxiliares como `conhost.exe`. Identidade ausente/alterada, falha de encerramento ou listener de outro PID preservam o manifesto. Testes usam processos e callbacks simulados; recuperação real deve ser autorizada após revisar os processos.
+- 2026-11-05: `test-env:stop` atualizado para o modelo de processos do Next dev. Verifica o processo principal e somente o filho direto `start-server.js` por executável, caminho do script, PID pai e ordem temporal de criação; aceita listeners apenas desses PIDs e ignora estados TCP residuais que não estão `Listen`. O filho é encerrado individualmente, sem `/T` ou `/F`. Cobertura automatizada simulada; nenhum ambiente real foi parado.
