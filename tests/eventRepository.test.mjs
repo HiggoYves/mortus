@@ -78,6 +78,16 @@ test("lista todos os eventos e seleciona corretamente intervalos com virada de d
   assert.equal((await repository.getById(overnight.id))?.endDate, "2026-11-01");
 });
 
+test("limita resultados no Prisma sem afetar listagens sem limite", async () => {
+  await repository.create({ ...draft, title: "Primeiro" });
+  await repository.create({ ...draft, title: "Segundo", startTime: "11:00", endTime: "12:00" });
+  await repository.create({ ...draft, title: "Terceiro", startTime: "13:00", endTime: "14:00" });
+  assert.equal((await repository.list()).length, 3);
+  assert.deepEqual((await repository.list({ from: draft.date, to: draft.date }, 2)).map(({ title }) => title), ["Primeiro", "Segundo"]);
+  await assert.rejects(repository.list({}, 0), EventRepositoryValidationError);
+  await assert.rejects(repository.list({}, 102), EventRepositoryValidationError);
+});
+
 test("rejeita intervalos inválidos e datas fora do formato antes de consultar o banco", async () => {
   await assert.rejects(repository.list({ from: "2026-11-02", to: "2026-11-01" }), EventRepositoryValidationError);
   await assert.rejects(repository.list({ from: "2026-02-30" }), EventRepositoryValidationError);

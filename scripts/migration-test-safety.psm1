@@ -131,8 +131,15 @@ function Assert-MortusTestPaths {
   Assert-MortusNoReparsePoints $expectedMainDatabase
 }
 
-function Test-MortusTestProcess($ProcessInfo, [string] $NextCli, [int] $Port) {
-  if (-not $ProcessInfo -or $ProcessInfo.Name -ine "node.exe" -or -not $ProcessInfo.CommandLine) { return $false }
+function Get-MortusNextArgumentList([string] $NextCli, [int] $Port) {
+  if (-not $NextCli -or $Port -lt 1 -or $Port -gt 65535) { throw "Argumentos inválidos para iniciar o Next.js." }
+  $quotedNextCli = '"' + $NextCli.Replace('"', '\"') + '"'
+  return "$quotedNextCli dev --hostname 127.0.0.1 --port $Port"
+}
+
+function Test-MortusTestProcess($ProcessInfo, [string] $NodePath, [string] $NextCli, [int] $Port) {
+  if (-not $ProcessInfo -or $ProcessInfo.Name -ine "node.exe" -or -not $ProcessInfo.CommandLine -or -not $ProcessInfo.ExecutablePath) { return $false }
+  if ((Get-MortusFullPath ([string]$ProcessInfo.ExecutablePath)) -ine (Get-MortusFullPath $NodePath)) { return $false }
   $commandLine = [string]$ProcessInfo.CommandLine
   return $commandLine.IndexOf($NextCli, [StringComparison]::OrdinalIgnoreCase) -ge 0 -and
     $commandLine -match '(?i)(^|\s)dev(\s|$)' -and
@@ -140,20 +147,109 @@ function Test-MortusTestProcess($ProcessInfo, [string] $NextCli, [int] $Port) {
     $commandLine -match "(?i)--port\s+`"?$Port`"?(\s|$)"
 }
 
-function Get-MortusTestProcessInventory([string] $NextCli, [int] $Port) {
+function Test-MortusNextServerChildImage($ProcessInfo, [string] $NodePath, [string] $ServerScript) {
+  if (-not $ProcessInfo -or $ProcessInfo.Name -ine "node.exe" -or -not $ProcessInfo.CommandLine -or -not $ProcessInfo.ExecutablePath) { return $false }
+  if ((Get-MortusFullPath ([string]$ProcessInfo.ExecutablePath)) -ine (Get-MortusFullPath $NodePath)) { return $false }
+  $scriptToken = '(?i)(^|\s)"?' + [regex]::Escape((Get-MortusFullPath $ServerScript)) + '"?(\s|$)'
+  return ([string]$ProcessInfo.CommandLine -match $scriptToken)
+}
+
+function Test-MortusNextServerChild($ProcessInfo, [string] $NodePath, [string] $ServerScript, [int] $ParentProcessId, [string] $ParentCreatedAt) {
+  if (-not (Test-MortusNextServerChildImage $ProcessInfo $NodePath $ServerScript) -or [int]$ProcessInfo.ParentProcessId -ne $ParentProcessId) { return $false }
+  $childCreatedAt = Get-MortusProcessCreatedAt $ProcessInfo
+  if (-not $childCreatedAt -or -not $ParentCreatedAt) { return $false }
+  try { return ([datetime]::Parse($childCreatedAt).ToUniversalTime() -gt [datetime]::Parse($ParentCreatedAt).ToUniversalTime()) } catch { return $false }
+}
+
+function Get-MortusProcessSnapshot {
+  try { return @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop) } catch {
+    throw "NÃ£o foi possÃ­vel consultar os processos do Windows; operaÃ§Ã£o interrompida sem tocar no banco."
+  }
+}
+
+function Get-MortusTestProcessInventory([string] $NodePath, [string] $NextCli, [int] $Port, [string] $ServerScript) {
   try {
-    $allProcesses = @(Get-CimInstance -ClassName Win32_Process -ErrorAction Stop)
+    $allProcesses = @(Get-MortusProcessSnapshot)
   } catch {
     throw "Não foi possível consultar os processos do Windows; operação interrompida sem tocar no banco."
   }
-  @($allProcesses | Where-Object { Test-MortusTestProcess $_ $NextCli $Port })
+  @($allProcesses | Where-Object { (Test-MortusTestProcess $_ $NodePath $NextCli $Port) -or ($ServerScript -and (Test-MortusNextServerChildImage $_ $NodePath $ServerScript)) })
+}
+
+function Get-MortusProcessCreatedAt($ProcessInfo) {
+  if (-not $ProcessInfo -or $null -eq $ProcessInfo.CreationDate) { return $null }
+  try {
+    $created = if ($ProcessInfo.CreationDate -is [string]) { [Management.ManagementDateTimeConverter]::ToDateTime([string]$ProcessInfo.CreationDate) } else { [datetime]$ProcessInfo.CreationDate }
+    return $created.ToUniversalTime().ToString("o")
+  } catch { return $null }
+}
+
+function Stop-MortusVerifiedTestProcess {
+  param(
+    [Parameter(Mandatory)]$ProcessInfo,
+    [Parameter(Mandatory)][string]$NodePath,
+    [Parameter(Mandatory)][string]$NextCli,
+    [Parameter(Mandatory)][int]$Port,
+    [Parameter(Mandatory)][string]$ExpectedCreatedAt,
+    [ValidateSet("main", "server-child")][string]$Role = "main",
+    [string]$ServerScript,
+    [int]$ParentProcessId,
+    [scriptblock]$Terminator
+  )
+  $targetPid = [int]$ProcessInfo.ProcessId
+  $current = @(Get-MortusProcessById -ProcessId $targetPid)
+  $identityMatches = if ($Role -eq "main") {
+    $current.Count -eq 1 -and (Test-MortusTestProcess $current[0] $NodePath $NextCli $Port) -and (Get-MortusProcessCreatedAt $current[0]) -ceq $ExpectedCreatedAt
+  } else {
+    $current.Count -eq 1 -and (Test-MortusNextServerChild $current[0] $NodePath $ServerScript $ParentProcessId $ExpectedCreatedAt) -and (Get-MortusProcessCreatedAt $current[0]) -ceq (Get-MortusProcessCreatedAt $ProcessInfo)
+  }
+  if (-not $identityMatches -or (Get-MortusProcessCreatedAt $current[0]) -cne (Get-MortusProcessCreatedAt $ProcessInfo)) {
+    throw "A identidade do processo mudou ou não pode ser comprovada; nenhum processo foi encerrado."
+  }
+  if ($Terminator) { & $Terminator $targetPid; return }
+  $output = & taskkill.exe /PID $targetPid 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "O Windows não confirmou o encerramento do PID $targetPid. $($output -join ' ')" }
+}
+
+function Get-MortusProcessById([int] $ProcessId) {
+  try {
+    @(Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $ProcessId" -ErrorAction Stop)
+  } catch {
+    throw "Não foi possível confirmar o estado do PID $ProcessId; operação interrompida sem tocar no banco."
+  }
+}
+
+function Test-MortusNoTcpListenersError($ErrorRecord) {
+  if (-not $ErrorRecord -or $ErrorRecord.CategoryInfo.Category -ne [System.Management.Automation.ErrorCategory]::ObjectNotFound) { return $false }
+  return ([string]$ErrorRecord.FullyQualifiedErrorId -in @(
+    "CmdletizationQuery_NotFound,Get-NetTCPConnection",
+    "CmdletizationQuery_NotFound_LocalPort,Get-NetTCPConnection"
+  ))
+}
+
+function Get-MortusPortTcpConnections([int] $Port) {
+  try {
+    return @(Get-NetTCPConnection -LocalPort $Port -ErrorAction Stop)
+  } catch {
+    if (Test-MortusNoTcpListenersError $_) { return @() }
+    throw "Não foi possível confirmar o estado da porta $Port; operação interrompida sem tocar no banco."
+  }
 }
 
 function Get-MortusPortListeners([int] $Port) {
-  try {
-    @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop)
-  } catch {
-    throw "Não foi possível confirmar o estado da porta $Port; operação interrompida sem tocar no banco."
+  $connections = @(Get-MortusPortTcpConnections -Port $Port)
+  @($connections | Where-Object { [string]$_.State -eq "Listen" })
+}
+
+function Assert-MortusPortListenersOwned {
+  param(
+    [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Listeners,
+    [Parameter(Mandatory)][AllowEmptyCollection()][int[]]$VerifiedProcessIds
+  )
+  foreach ($listener in $Listeners) {
+    if ($null -eq $listener.OwningProcess -or $VerifiedProcessIds -notcontains [int]$listener.OwningProcess) {
+      throw "A porta está vinculada a outro processo ou não foi possível comprovar o proprietário. Manifesto preservado."
+    }
   }
 }
 
@@ -177,11 +273,39 @@ function Assert-MortusTestProcessRegistered([bool] $ManifestExists, [AllowEmptyC
   }
 }
 
-function Write-MortusTestManifest([string] $ManifestPath, [System.Collections.IDictionary] $Manifest) {
+function ConvertTo-MortusTestManifestDictionary($Manifest) {
+  $result = [ordered]@{}
+  if ($Manifest -is [System.Collections.IDictionary]) {
+    foreach ($key in $Manifest.Keys) { $result[[string]$key] = $Manifest[$key] }
+    return $result
+  }
+  if ($Manifest -is [System.Management.Automation.PSCustomObject]) {
+    foreach ($property in $Manifest.PSObject.Properties) {
+      if ($property.MemberType -notin @("NoteProperty", "Property")) { continue }
+      $result[[string]$property.Name] = $property.Value
+    }
+    if ($result.Count -gt 0) { return $result }
+  }
+  throw "Manifest must be a non-empty JSON object or dictionary."
+}
+
+function Read-MortusTestManifest([string] $ManifestPath) {
+  Assert-MortusNoReparsePoints $ManifestPath
+  if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) { throw "Manifest file was not found." }
+  try {
+    $parsed = Get-Content -LiteralPath $ManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json -ErrorAction Stop
+    return ConvertTo-MortusTestManifestDictionary $parsed
+  } catch {
+    throw "Manifest JSON is invalid or has an unsupported root type."
+  }
+}
+
+function Write-MortusTestManifest([string] $ManifestPath, $Manifest) {
+  $normalizedManifest = ConvertTo-MortusTestManifestDictionary $Manifest
   Assert-MortusNoReparsePoints (Split-Path -Parent $ManifestPath)
   Assert-MortusNoReparsePoints $ManifestPath
   $temporaryPath = "$ManifestPath.$([guid]::NewGuid().ToString('N')).tmp"
-  $json = $Manifest | ConvertTo-Json -Depth 5
+  $json = $normalizedManifest | ConvertTo-Json -Depth 5
   [IO.File]::WriteAllText($temporaryPath, $json, [Text.UTF8Encoding]::new($false))
   try {
     Assert-MortusNoReparsePoints $ManifestPath
@@ -202,4 +326,4 @@ function Remove-MortusTestManifest([string] $ManifestPath) {
   if (Test-Path -LiteralPath $ManifestPath -PathType Leaf) { Remove-Item -LiteralPath $ManifestPath -Force }
 }
 
-Export-ModuleMember -Function Get-MortusFullPath, Enter-MortusTestOperation, Exit-MortusTestOperation, Test-MortusReparseItem, Assert-MortusDatabaseIsolated, Assert-MortusNoReparsePoints, Assert-MortusTestPaths, Test-MortusTestProcess, Get-MortusTestProcessInventory, Get-MortusPortListeners, Assert-MortusTestServerStopped, Assert-MortusTestProcessRegistered, Write-MortusTestManifest, Remove-MortusTestManifest
+Export-ModuleMember -Function Get-MortusFullPath, Enter-MortusTestOperation, Exit-MortusTestOperation, Test-MortusReparseItem, Assert-MortusDatabaseIsolated, Assert-MortusNoReparsePoints, Assert-MortusTestPaths, Get-MortusNextArgumentList, Test-MortusTestProcess, Test-MortusNextServerChildImage, Test-MortusNextServerChild, Get-MortusProcessSnapshot, Get-MortusTestProcessInventory, Get-MortusProcessById, Get-MortusProcessCreatedAt, Stop-MortusVerifiedTestProcess, Test-MortusNoTcpListenersError, Get-MortusPortTcpConnections, Get-MortusPortListeners, Assert-MortusPortListenersOwned, Assert-MortusTestServerStopped, Assert-MortusTestProcessRegistered, ConvertTo-MortusTestManifestDictionary, Read-MortusTestManifest, Write-MortusTestManifest, Remove-MortusTestManifest

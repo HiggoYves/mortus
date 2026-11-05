@@ -9,6 +9,8 @@ $mainDatabase = Join-Path $projectRoot "prisma\mortus.db"
 $manifestPath = Join-Path $testDirectory "server.json"
 $port = 3002
 $nextCli = [IO.Path]::GetFullPath((Join-Path $projectRoot "node_modules\next\dist\bin\next"))
+$serverScript = [IO.Path]::GetFullPath((Join-Path $projectRoot "node_modules\next\dist\server\lib\start-server.js"))
+$nodePath = [IO.Path]::GetFullPath((Get-Command node.exe -ErrorAction Stop).Source)
 
 function Assert-TestEnvironmentStopped {
   Assert-MortusTestPaths -ProjectRoot $projectRoot -TestDirectory $testDirectory -TestDatabase $testDatabase -MainDatabase $mainDatabase
@@ -16,7 +18,7 @@ function Assert-TestEnvironmentStopped {
   if (Test-Path -LiteralPath $manifestPath) {
     throw "Existe um registro de servidor; execute test-env:stop e confirme a parada antes de descartar."
   }
-  $processes = @(Get-MortusTestProcessInventory -NextCli $nextCli -Port $port)
+  $processes = @(Get-MortusTestProcessInventory -NodePath $nodePath -NextCli $nextCli -Port $port -ServerScript $serverScript)
   $listeners = @(Get-MortusPortListeners -Port $port)
   Assert-MortusTestServerStopped -ProcessInventory $processes -PortListeners $listeners
 }

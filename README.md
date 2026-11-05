@@ -1,6 +1,6 @@
 # Mortus — Calendário pessoal com IA
 
-**Status:** protótipo funcional em Next.js e TypeScript. O calendário permite navegar entre meses, selecionar dias e criar, editar e excluir eventos. Os eventos são salvos no `localStorage` do navegador.
+**Status:** Mortus v0.4.0 em desenvolvimento na branch `feat/ai`. O calendário oferece operações de eventos e persistência local; o assistente Gemini foi validado manualmente com dados fictícios e permanece somente leitura.
 
 O Mortus será um aplicativo pessoal de calendário com inteligência artificial integrada, para uso local e como portfólio Full Stack. A interface conceitual terá o calendário na área principal e o assistente em um painel de conversa lateral. O design definitivo será desenvolvido depois; o foco inicial é fazer as funções essenciais funcionarem.
 
@@ -22,7 +22,7 @@ O Mortus será um aplicativo pessoal de calendário com inteligência artificial
 - `app/lib/eventApiClient.ts` valida as respostas REST consumidas pela interface e não converte falhas de rede em listas vazias.
 - `app/actions/eventMigration.ts` executa a importação em lote por Server Action, verificando a origem local antes de chamar o repositório.
 
-Essa separação mantém regras, persistência local, API e acesso ao banco independentes da interface. Há endpoints HTTP para eventos, mas ainda não existe login nem integração de IA.
+Essa separação mantém regras, persistência local, API e acesso ao banco independentes da interface. Há endpoints HTTP para eventos e para o assistente; ainda não existe login.
 
 Ao carregar dados antigos do `localStorage`, o aplicativo converte o campo `time` para `startTime` e atribui duração padrão de uma hora, incluindo quando o término cai no dia seguinte. Eventos já migrados preservam seus horários; quando não têm data de término, a migração usa a data original se o intervalo for válido nela e avança para o dia seguinte quando necessário. A chave `mortus.calendar.events.v1` é mantida. A migração salva a nova estrutura somente quando toda a lista pode ser convertida; dados inválidos permanecem no armazenamento sem serem sobrescritos.
 
@@ -36,8 +36,8 @@ O backup é manual e fica sob responsabilidade do usuário. `localStorage` não 
 
 O repositório Prisma, a API e a integração opcional com SQLite estão no servidor. A migração só ocorre por ação explícita no calendário; seus dados reais não são transferidos automaticamente. O arquivo SQLite local é ignorado pelo Git. O `localStorage` permanece como cópia de recuperação e nenhum dado real foi migrado nesta implementação.
 
-## Próximas funcionalidades
-- Assistente de IA integrado para consultar e propor alterações em eventos.
+## Funcionalidades futuras
+- Ações de criação, edição e exclusão por IA seguem pendentes e exigirão validação no servidor e confirmação explícita antes de qualquer escrita.
 - Lembretes programados com antecedência configurável.
 - Possível interação por voz em etapa futura.
 - Integração futura com Google Calendar e notificações Gmail.
@@ -53,6 +53,31 @@ O projeto usa Next.js 16.4.3, React e TypeScript. Os estilos estão em CSS próp
 - `GET /api/events/[id]` consulta um evento.
 - `PATCH /api/events/[id]` aplica campos do evento; envie somente campos a alterar. O ID não pode ser alterado.
 - `DELETE /api/events/[id]` exclui um evento.
+
+### Assistente Gemini e consultas de leitura (Etapas 7.2 a 7.7)
+
+- `POST /api/assistant` recebe `{ "message": "..." }` e devolve uma resposta estruturada. O provedor `mock` continua padrão; `MORTUS_AI_PROVIDER=gemini` seleciona Gemini no servidor. O endpoint usa as verificações locais de origem/host existentes e não autentica o solicitante.
+- `app/components/AssistantPanel.tsx` apresenta o chat sem alterar as operações do calendário. O painel pode ser fechado e reaberto sem perder as mensagens enquanto a página permanecer aberta; a conversa não é persistida.
+- `app/lib/ai/types.ts` define o contrato `AssistantProvider`, respostas com chamada de ferramenta e os esquemas JSON estritos de `list_events` e `get_agenda_summary`.
+- `app/lib/ai/mockProvider.ts` reconhece comandos exatos: `/list_events {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"}` e `/get_agenda_summary {"from":"AAAA-MM-DD","to":"AAAA-MM-DD"}`. A mensagem deve conter JSON válido; pedidos em linguagem natural livre não executam consultas no mock.
+- `app/lib/ai/geminiProvider.ts` é a fronteira exclusiva do servidor que instancia o SDK oficial `@google/genai`. `geminiProviderCore.ts` envia a mensagem e declara somente `list_events` e `get_agenda_summary`, usando function calling `AUTO` com até 512 tokens de saída. O mock continua limitado aos comandos estruturados documentados acima.
+- A integração real foi validada manualmente com `gemini-3.1-flash-lite`, incluindo consultas em português natural e function calling para leitura. Esse é o modelo padrão; `GEMINI_MODEL` permite selecionar outro ID. A data local para interpretação relativa é calculada no servidor em `America/Manaus`. O servidor executa no máximo uma consulta local por resposta do modelo e não envia os eventos encontrados de volta ao Gemini.
+- `GEMINI_API_KEY` é lida apenas no servidor. Não use prefixo `NEXT_PUBLIC_`. Para habilitar, defina as variáveis no `.env.local` (ignorado pelo Git) e `MORTUS_AI_PROVIDER=gemini`; sem seleção explícita, o mock permanece ativo. `.env.example` contém somente espaço reservado sem chave.
+- O adaptador reserva no máximo 5 chamadas por minuto e 30 em uma janela móvel de 24 horas no processo Node. Rejeita antes de chamar o Google quando o limite local é atingido. Esses contadores são voláteis e reiniciam com o processo; não substituem cotas/rate limits da conta Google. A aplicação faz uma única chamada externa por mensagem (limite máximo pedido: duas).
+- Mensagens com até 2.000 caracteres, consultas com até 31 dias e até 100 eventos continuam validadas pelo servidor. A mensagem do usuário é enviada ao Gemini quando o provedor é ativado; eventos e resultados das consultas retornam apenas ao cliente e não são enviados ao modelo. Se uma etapa futura propuser uma segunda chamada contendo dados de eventos, ela exigirá consentimento por consulta, desligado por padrão, com prévia dos campos e intervalo a enviar e opção de cancelar.
+- Em erro 429 do Google, timeout, resposta inválida ou indisponibilidade, a rota devolve erro controlado; o calendário funciona separadamente. O timeout aborta o pedido no cliente SDK, mas o Google informa que abortar o cliente pode não cancelar processamento ou cobrança no serviço.
+- `app/lib/ai/calendarTools.ts` valida argumentos independentemente do provedor e despacha somente as duas ferramentas de leitura. O resumo (contagem por dia/categoria) é calculado no servidor sobre os eventos retornados pelo repositório.
+- `app/lib/ai/assistantService.ts` valida mensagens não vazias de até 2.000 caracteres, limita a espera do provedor a 5 segundos, executa somente ferramentas permitidas e normaliza erros/indisponibilidade.
+- `app/lib/eventRepository.ts` aceita um limite opcional para consultas; o assistente pede no máximo 101 registros para detectar excesso. A lista retorna até 100 e sinaliza truncamento. Resumos com mais de 100 eventos são recusados para não apresentar totais incompletos.
+- O intervalo deve ser inclusivo, em ordem válida, e conter no máximo 31 dias. Em indisponibilidade do SQLite, a API informa erro temporário sem incluir detalhes internos do banco.
+- `app/lib/ai/assistantApi.ts` limita o corpo HTTP a 8 KiB e aceita somente o campo `message`. A rota `app/api/assistant/route.ts` injeta o repositório existente; não cria consultas SQL próprias.
+- Testes em `tests/assistant.test.mjs` cobrem parsing determinístico, rejeição de argumentos e ferramentas inválidas, limites, resumo, origem local e falhas. `tests/eventRepository.test.mjs` verifica o limite em SQLite temporário.
+
+Configuração local: em PowerShell, copie `.env.example` para `.env.local`, preencha `GEMINI_API_KEY` com uma chave criada no Google AI Studio e selecione `MORTUS_AI_PROVIDER=gemini`. O Gemini só é ativado por essa seleção explícita; sem ela, o mock permanece padrão. Nunca versione `.env.local` nem compartilhe a chave. Para voltar ao modo offline, use `MORTUS_AI_PROVIDER=mock` ou remova a variável; reinicie o servidor para atualizar o ambiente.
+
+Privacidade e custos: quando Gemini está ativado, a mensagem digitada pelo usuário é enviada ao Google. Eventos pessoais e resultados das ferramentas não são enviados ao provedor; não inclua dados sensíveis na mensagem. Revise os termos de tratamento de dados do Google antes de usar informações pessoais. A geração real foi validada, mas cota gratuita, custos e disponibilidade para uso contínuo do modelo 3.1 não foram verificados; consulte os termos e preços atuais da sua conta antes de uso frequente. Os limites locais do Mortus não substituem cotas do Google.
+
+O serviço recebe uma interface do repositório com somente `list`; não recebe Prisma nem SQL. Nenhuma operação de escrita está conectada. A aplicação está configurada para uso local em `127.0.0.1`. Hospedagem pública ou acesso pela rede exige autenticação e autorização, além de revisão de segurança; verificações de `Origin` e `Host` não autenticam usuários ou processos. Não exponha as APIs por proxy, túnel ou encaminhamento de portas.
 
 Escritas exigem `Origin` exatamente `http://localhost:3000` ou `http://127.0.0.1:3000` e `Host` local correspondente; requisições de escrita sem `Origin` são rejeitadas. Leituras também verificam `Host` e rejeitam `Origin` externo. Não há CORS habilitado. Essas medidas não substituem autenticação e a API deve permanecer restrita ao próprio computador.
 
@@ -85,7 +110,7 @@ O script grava `.mortus-test/server.json` no estado `starting` antes de migrar o
 Comandos no PowerShell, a partir da raiz do projeto:
 
 - `npm.cmd run test-env:start` prepara o schema temporário e inicia o servidor de teste em loopback, porta 3002 (porta 3001 ocupada neste computador).
-- `npm.cmd run test-env:stop` identifica o Next pelo executável, caminho do projeto, host e porta; encerra somente a árvore do processo verificada e registrada, sem `/F`, e remove o manifesto apenas após confirmar que os processos e a porta foram liberados. Um processo correspondente sem manifesto é tratado como ambíguo e não é encerrado. Se a consulta ou o encerramento falhar, preserva o manifesto e informa o bloqueio. Execute novamente em um PowerShell com permissão para consultar/parar processos.
+- `npm.cmd run test-env:stop` encerra somente processos com identidade comprovada: o PID Node registrado ou o filho direto Node que use o executável esperado e o caminho exato `node_modules/next/dist/server/lib/start-server.js`, tenha `ParentProcessId` igual ao PID registrado e data de criação posterior à do pai. Revalida PID, comando e data antes de cada encerramento. Não encerra descendentes genéricos e não usa `/T` nem `/F`. Aceita listener somente no processo principal ou nesse filho validado. Consulta todos os estados TCP, mas somente `Listen` indica porta ocupada; `TimeWait` e `Closed` são residuais. Só remove o manifesto quando não restam processos Next reconhecidos nem listeners. Ambiguidade, PID reutilizado, listener desconhecido ou falha de consulta preservam manifesto, banco e logs.
 - `npm.cmd run test-env:discard` recusa o descarte se houver manifesto, processo Next de teste, listener na porta ou consulta de estado indisponível. Após digitar `DISCARD MORTUS TEST DB`, verifica tudo novamente e rejeita junctions, links simbólicos e outros reparse points em todos os componentes dos caminhos. Também confirma a identidade física do SQLite e recusa arquivos com hard links ou identidade igual ao banco principal. Remove somente `migration-test.db` e os auxiliares `-journal`, `-wal` e `-shm` diretamente dentro de `.mortus-test/`; não remove a pasta nem os logs.
 
 Iniciar, parar e descartar usam um mutex local para não correrem ao mesmo tempo. Se a inicialização falhar após criar o processo, o registro permanece em `failed` com o PID e a parada segura é tentada. Se não for possível provar que o servidor parou, o registro fica disponível para uma nova tentativa de `test-env:stop`; não execute o descarte nesse estado.
@@ -109,7 +134,7 @@ Para iniciar localmente, instale as dependências com `npm install`, gere o clie
 - Tratar conteúdo de eventos e, quando a integração Gmail existir, mensagens como dados não confiáveis.
 
 ## Próximo passo
-Consultar `TASKS.md`. A ordem do roadmap é: corrigir data e navegação; melhorar modelo dos eventos; separar regras de negócio; proteger dados armazenados; criar testes automatizados; preparar backend e banco de dados; integrar IA. A validação manual no navegador dos fluxos de eventos e backup continua pendente.
+Consulte `TASKS.md` para o estado e o roadmap. As etapas 7.2 a 7.7 do assistente estão implementadas; escrita de eventos por IA, autenticação, lembretes e integrações Google Calendar/Gmail permanecem futuras.
 
 ## Referências
 - Next.js: https://nextjs.org/docs

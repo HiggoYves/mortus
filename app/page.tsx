@@ -1,5 +1,7 @@
 "use client";
 
+import AssistantPanel from "./components/AssistantPanel";
+
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { createCalendarEvent, deleteCalendarEvent, eventCategories, EVENT_STORAGE_KEY, findEventConflicts, updateCalendarEvent, validateEventTimeRange } from "./lib/events";
 import type { CalendarEvent, EventCategory } from "./lib/events";
@@ -42,6 +44,7 @@ export default function Home() {
   const [draftCategory, setDraftCategory] = useState<EventCategory>("Pessoal");
   const [formError, setFormError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [migrationPreview, setMigrationPreview] = useState<MigrationPreview | null>(null);
   const [migrationBackupReady, setMigrationBackupReady] = useState(false);
   const [migrationBackupConfirmed, setMigrationBackupConfirmed] = useState(false);
@@ -405,7 +408,8 @@ export default function Home() {
       </aside>
 
       <section className="workspace" id="inicio">
-        <header className="topbar"><div className="breadcrumb">Meu espaço <span>/</span> <strong>Calendário</strong></div><div className="top-actions"><button className="icon-button" aria-label="Pesquisar">⌕</button><button className="icon-button notification" aria-label="Notificações">♧</button><div className="avatar small-avatar">M</div></div></header>
+        <header className="topbar"><div className="breadcrumb">Meu espaço <span>/</span> <strong>Calendário</strong></div><div className="top-actions"><button className="assistant-trigger" type="button" aria-expanded={assistantOpen} aria-controls="mortus-assistant-panel" onClick={() => setAssistantOpen((open) => !open)}><span aria-hidden="true">✦</span> Assistente</button><button className="icon-button" aria-label="Pesquisar">⌕</button><button className="icon-button notification" aria-label="Notificações">♧</button><div className="avatar small-avatar">M</div></div></header>
+        <div className={`workspace-body ${assistantOpen ? "assistant-expanded" : ""}`}>
         <div className="content">
           <div className="page-heading"><div><div className="eyebrow">SEU TEMPO, NO SEU RITMO</div><h1>Calendário</h1><p>Um lugar tranquilo para organizar o que importa.</p></div><button className="primary-button" disabled={!storageReady || !storageCanWrite || isBusy} onClick={openCreateForm}><span>＋</span> Novo evento</button></div>
           <div className="calendar-card">
@@ -462,6 +466,9 @@ export default function Home() {
           </div>
           {storageWarning && <div className="storage-warning" role="status">{storageWarning}</div>}
           <div className="prototype-note"><span>✦</span> {persistenceMode === "sqlite" ? "Seus eventos são salvos no SQLite; a cópia local do navegador foi preservada." : "Seus eventos são salvos neste navegador."}</div>
+        </div>
+        <button className="assistant-backdrop" type="button" hidden={!assistantOpen} aria-label="Fechar assistente" onClick={() => setAssistantOpen(false)} />
+        <AssistantPanel open={assistantOpen} onClose={() => setAssistantOpen(false)} />
         </div>
       </section>
     </main>
